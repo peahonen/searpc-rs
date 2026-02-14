@@ -439,9 +439,9 @@ fn match_return_type(
             if segment.ident == "Option" {
                 if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
                     if let Some(syn::GenericArgument::Type(_inner)) = args.args.first() {
-                        // Option<T> - use call_object and return None on null
+                        // Option<T> - use raw JSON so both primitive and object payloads work.
                         return Ok((
-                            quote!(call_object),
+                            quote!(call_json),
                             quote! {
                                 if result.is_null() {
                                     Ok(None)
