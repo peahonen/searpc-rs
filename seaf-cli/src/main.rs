@@ -163,7 +163,7 @@ enum Commands {
 
     /// Sync a library with an existing folder
     Sync {
-        /// Library ID
+        /// Library ID or library name
         #[arg(short = 'l', long)]
         library: String,
 
@@ -970,7 +970,7 @@ fn handle_sync<T: searpc::Transport>(
     client: &mut SearpcClient<T>,
     conf_dir: &Path,
     datadir_path: &Path,
-    repo_id: &str,
+    library: &str,
     server: Option<&str>,
     folder: &Path,
     username: Option<&str>,
@@ -1000,8 +1000,13 @@ fn handle_sync<T: searpc::Transport>(
     )?;
 
     let http_client = SeafileHttpClient::new(server_url);
+    let repo_id = resolve_library_id(&http_client, &token, library)?;
+    debug!(
+        "Resolved library argument '{}' to repo id '{}'",
+        library, repo_id
+    );
     debug!("Getting download info for repo: {}", repo_id);
-    let download_info = http_client.get_repo_download_info(&token, repo_id)?;
+    let download_info = http_client.get_repo_download_info(&token, &repo_id)?;
     debug!("download_info: {}", serde_json::to_string_pretty(&download_info)?);
 
     let is_encrypted = !download_info.encrypted.is_empty() && download_info.encrypted != "0";
@@ -1037,7 +1042,7 @@ fn handle_sync<T: searpc::Transport>(
         .ok_or_else(|| anyhow!("Path contains invalid UTF-8: {}", folder.display()))?;
 
     client.clone(
-        repo_id,
+        &repo_id,
         download_info.repo_version,
         &download_info.repo_name,
         folder_str,
@@ -1059,4 +1064,43 @@ fn handle_sync<T: searpc::Transport>(
     )?;
 
     Ok(())
+}
+
+fn resolve_library_id(http_client: &SeafileHttpClient, token: &str, library: &str) -> Result<String> {
+    if looks_like_repo_id(library) {
+        return Ok(library.to_string());
+    }
+
+    let repos = http_client.list_repos(token)?;
+    repos
+        .iter()
+        .find(|repo| repo.name == library || repo.id == library)
+        .map(|repo| repo.id.clone())
+        .with_context(|| {
+            format!(
+                "Library '{}' not found. Provide an exact library name or library ID.",
+                library
+            )
+        })
+}
+
+fn looks_like_repo_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+
+    for &idx in &[8, 13, 18, 23] {
+        if bytes[idx] != b'-' {
+            return false;
+        }
+    }
+
+    bytes.iter().enumerate().all(|(i, b)| {
+        if matches!(i, 8 | 13 | 18 | 23) {
+            true
+        } else {
+            b.is_ascii_hexdigit()
+        }
+    })
 }
